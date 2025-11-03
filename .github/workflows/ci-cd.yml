@@ -34,38 +34,29 @@ jobs:
           mvn -B clean package --file pom.xml
           # package the azure functions structure; fail if plugin not configured
           mvn -B azure-functions:package
-          # ensure the repository host.json (updated extensionBundle) overrides any generated one
-          if [ -f src/main/resources/host.json ]; then
-            echo "Copying repo host.json to target/azure-functions/"
-            mkdir -p target/azure-functions
-            cp src/main/resources/host.json target/azure-functions/host.json || true
-          elif [ -f host.json ]; then
-            echo "Copying root host.json to target/azure-functions/"
-            mkdir -p target/azure-functions
-            cp host.json target/azure-functions/host.json || true
-          fi
           if [ ! -d target/azure-functions ]; then
             echo "ERROR: target/azure-functions not found. Ensure azure-functions-maven-plugin is configured." >&2
             ls -la target || true
             exit 1
           fi
-          cd target/azure-functions
-          # If there's a single top-level directory produced by the plugin, zip its CONTENTS (avoid nesting)
-          count=$(ls -A | wc -l)
-          if [ "$count" -eq 1 ] && [ -d "$(ls -A | sed -n '1p')" ]; then
-            dir=$(ls -A | sed -n '1p')
-            echo "Single top-level dir detected: $dir — zipping its contents"
-            cd "$dir"
-            # we're inside target/azure-functions/<dir> -> need to go up 3 levels to reach repo root
-            zip -r ../../../function-deploy.zip .
-            cd ..
-          else
-            echo "Multiple items detected — zipping whole target/azure-functions content"
-            zip -r ../../function-deploy.zip .
+          # locate inner app folder created by the plugin (e.g., target/azure-functions/<appName>)
+          APP_DIR=$(find target/azure-functions -mindepth 1 -maxdepth 1 -type d | head -n1)
+          if [ -z "$APP_DIR" ]; then
+            echo "ERROR: Could not find inner app directory under target/azure-functions" >&2
+            ls -la target/azure-functions || true
+            exit 1
           fi
-          cd ../../
-          # ensure zip exists at repo root
-          ls -la function-deploy.zip || ls -la function-deploy.zip || true
+          echo "Detected app directory: $APP_DIR"
+          # overwrite host.json INSIDE the app directory so runtime reads the correct bundle version
+          if [ -f src/main/resources/host.json ]; then
+            cp src/main/resources/host.json "$APP_DIR/host.json"
+          elif [ -f host.json ]; then
+            cp host.json "$APP_DIR/host.json"
+          fi
+          # create zip from the CONTENTS of the app directory (no parent folder in zip)
+          (cd "$APP_DIR" && zip -r "$(pwd)/../../../function-deploy.zip" .)
+          # verify zip exists at repo root
+          ls -la function-deploy.zip
           # validate ZIP contains at least one function.json
           if ! unzip -l function-deploy.zip | grep -q 'function.json'; then
             echo "ERROR: function-deploy.zip does not contain any function.json files. Failing build." >&2
@@ -76,7 +67,7 @@ jobs:
       - name: Upload artifact (function zip)
         uses: actions/upload-artifact@v4
         with:
-          name: function-deploy
+          name: function-deploy-artifact
           path: function-deploy.zip
 
   deploy:
