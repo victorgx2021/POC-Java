@@ -28,26 +28,24 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-m2-
 
-      - name: Build with Maven
+      - name: Build and package Azure Function
         run: |
-          mvn -B package --file pom.xml
-          # generate azure functions package (creates target/azure-functions)
-          mvn -B azure-functions:package || true
-
-      - name: Prepare function zip
-        run: |
-          if [ -d target/azure-functions ]; then
-            cd target/azure-functions
-            zip -r ../../function-deploy.zip .
-            cd ../../
-            ls -la function-deploy.zip
-          else
-            # fallback: package the jar (legacy)
-            zip -j function-deploy.zip target/*.jar || true
-            ls -la function-deploy.zip || true
+          set -e
+          mvn -B clean package --file pom.xml
+          # package the azure functions structure; fail if plugin not configured
+          mvn -B azure-functions:package
+          if [ ! -d target/azure-functions ]; then
+            echo "ERROR: target/azure-functions not found. Ensure azure-functions-maven-plugin is configured." >&2
+            ls -la target || true
+            exit 1
           fi
+          cd target/azure-functions
+          # create zip without nesting another zip
+          zip -r ../../function-deploy.zip .
+          cd ../../
+          ls -la function-deploy.zip
 
-      - name: Upload artifact
+      - name: Upload artifact (function zip)
         uses: actions/upload-artifact@v4
         with:
           name: function-deploy
