@@ -41,7 +41,7 @@
                 <version>${functions.maven.plugin.version}</version>
                 <configuration>
                     <resourceGroup></resourceGroup>
-                    <appName></appName>
+                    <appName>${project.artifactId}</appName>
                     <region></region>
                     <!-- runtime will be configured in Azure portal; omit from pom to avoid plugin parsing issues -->
                 </configuration>
