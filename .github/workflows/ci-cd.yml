@@ -40,10 +40,26 @@ jobs:
             exit 1
           fi
           cd target/azure-functions
-          # create zip without nesting another zip
-          zip -r ../../function-deploy.zip .
+          # If there's a single top-level directory produced by the plugin, zip its CONTENTS (avoid nesting)
+          count=$(ls -A | wc -l)
+          if [ "$count" -eq 1 ] && [ -d "$(ls -A | sed -n '1p')" ]; then
+            dir=$(ls -A | sed -n '1p')
+            echo "Single top-level dir detected: $dir — zipping its contents"
+            cd "$dir"
+            zip -r ../../function-deploy.zip .
+            cd ..
+          else
+            echo "Multiple items detected — zipping whole target/azure-functions content"
+            zip -r ../../function-deploy.zip .
+          fi
           cd ../../
           ls -la function-deploy.zip
+          # validate ZIP contains at least one function.json
+          if ! unzip -l function-deploy.zip | grep -q 'function.json'; then
+            echo "ERROR: function-deploy.zip does not contain any function.json files. Failing build." >&2
+            unzip -l function-deploy.zip || true
+            exit 1
+          fi
 
       - name: Upload artifact (function zip)
         uses: actions/upload-artifact@v4
