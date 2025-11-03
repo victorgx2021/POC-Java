@@ -43,11 +43,7 @@
                     <resourceGroup></resourceGroup>
                     <appName></appName>
                     <region></region>
-                    <runtime>
-                        <os>linux</os>
-                        <language>java</language>
-                        <javaVersion>11</javaVersion>
-                    </runtime>
+                    <!-- runtime will be configured in Azure portal; omit from pom to avoid plugin parsing issues -->
                 </configuration>
             </plugin>
         </plugins>
