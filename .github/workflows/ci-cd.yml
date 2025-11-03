@@ -29,13 +29,29 @@ jobs:
             ${{ runner.os }}-m2-
 
       - name: Build with Maven
-        run: mvn -B package --file pom.xml
+        run: |
+          mvn -B package --file pom.xml
+          # generate azure functions package (creates target/azure-functions)
+          mvn -B azure-functions:package || true
+
+      - name: Prepare function zip
+        run: |
+          if [ -d target/azure-functions ]; then
+            cd target/azure-functions
+            zip -r ../../function-deploy.zip .
+            cd ../../
+            ls -la function-deploy.zip
+          else
+            # fallback: package the jar (legacy)
+            zip -j function-deploy.zip target/*.jar || true
+            ls -la function-deploy.zip || true
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: function-jar
-          path: target/*.jar
+          name: function-deploy
+          path: function-deploy.zip
 
   deploy:
     name: Deploy to Azure Functions
@@ -52,18 +68,36 @@ jobs:
       - name: Install Azure CLI
         uses: azure/setup-azure-cli@v3
 
-      - name: Deploy using publish profile
+      - name: Deploy (prefer Service Principal, fallback to publish profile)
         env:
-          AZURE_WEBAPP_PUBLISH_PROFILE: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+          AZURE_FUNCTIONAPP_NAME: ${{ secrets.AZURE_FUNCTIONAPP_NAME }}
+          AZURE_FUNCTIONAPP_RESOURCE_GROUP: ${{ secrets.AZURE_FUNCTIONAPP_RESOURCE_GROUP }}
+          AZURE_FUNCTIONAPP_PUBLISH_PROFILE: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
         run: |
-          echo "$AZURE_WEBAPP_PUBLISH_PROFILE" > publishProfile.xml
-          az functionapp deployment source config-zip --src `
-            bash -c 'ls artifact | sed -n "1p"'` \
-            --name ${{ secrets.AZURE_FUNCTIONAPP_NAME }} \
-            --resource-group ${{ secrets.AZURE_FUNCTIONAPP_RESOURCE_GROUP }} || (
-            echo "Attempting deploy using publish-profile with msdeploy..." && \
-            az webapp deployment source config-zip --src `ls artifact | sed -n "1p"` --name ${{ secrets.AZURE_FUNCTIONAPP_NAME }} --resource-group ${{ secrets.AZURE_FUNCTIONAPP_RESOURCE_GROUP }}
-          )
+          # download artifact
+          ls -la artifact || true
+          cp artifact/function-deploy.zip ./function-deploy.zip || cp artifact/* ./function-deploy.zip || true
+
+          if [ -n "$AZURE_CREDENTIALS" ]; then
+            echo "Logging into Azure using service principal..."
+            echo "$AZURE_CREDENTIALS" > azurecreds.json
+            az login --service-principal --username $(jq -r '.clientId' azurecreds.json) --password $(jq -r '.clientSecret' azurecreds.json) --tenant $(jq -r '.tenantId' azurecreds.json)
+            az functionapp deployment source config-zip --resource-group "$AZURE_FUNCTIONAPP_RESOURCE_GROUP" --name "$AZURE_FUNCTIONAPP_NAME" --src function-deploy.zip
+          elif [ -n "$AZURE_FUNCTIONAPP_PUBLISH_PROFILE" ]; then
+            echo "Using publish profile fallback..."
+            echo "$AZURE_FUNCTIONAPP_PUBLISH_PROFILE" > publishProfile.xml
+            user=$(xmllint --xpath 'string(//publishProfile/@userName)' publishProfile.xml 2>/dev/null || true)
+            pwd=$(xmllint --xpath 'string(//publishProfile/@userPWD)' publishProfile.xml 2>/dev/null || true)
+            if [ -n "$user" ]; then
+              curl -X POST -u "$user:$pwd" "https://$AZURE_FUNCTIONAPP_NAME.scm.azurewebsites.net/api/zipdeploy" --data-binary @function-deploy.zip
+            else
+              # fallback to az cli zip deploy (may work without publish profile if logged in)
+              az functionapp deployment source config-zip --resource-group "$AZURE_FUNCTIONAPP_RESOURCE_GROUP" --name "$AZURE_FUNCTIONAPP_NAME" --src function-deploy.zip
+            fi
+          else
+            echo "No Azure credentials found. Skipping deploy." && exit 1
+          fi
 
       - name: Confirm deployment
         run: echo "Deployment attempted for ${{ secrets.AZURE_FUNCTIONAPP_NAME }}"
