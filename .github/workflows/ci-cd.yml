@@ -46,14 +46,16 @@ jobs:
             dir=$(ls -A | sed -n '1p')
             echo "Single top-level dir detected: $dir — zipping its contents"
             cd "$dir"
-            zip -r ../../function-deploy.zip .
+            # we're inside target/azure-functions/<dir> -> need to go up 3 levels to reach repo root
+            zip -r ../../../function-deploy.zip .
             cd ..
           else
             echo "Multiple items detected — zipping whole target/azure-functions content"
             zip -r ../../function-deploy.zip .
           fi
           cd ../../
-          ls -la function-deploy.zip
+          # ensure zip exists at repo root
+          ls -la function-deploy.zip || ls -la function-deploy.zip || true
           # validate ZIP contains at least one function.json
           if ! unzip -l function-deploy.zip | grep -q 'function.json'; then
             echo "ERROR: function-deploy.zip does not contain any function.json files. Failing build." >&2
