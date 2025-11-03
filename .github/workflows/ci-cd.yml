@@ -1,0 +1,70 @@
+name: CI-CD Azure Function (Java 11)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build and publish artifact
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Cache Maven packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-m2-
+
+      - name: Build with Maven
+        run: mvn -B package --file pom.xml
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: function-jar
+          path: target/*.jar
+
+  deploy:
+    name: Deploy to Azure Functions
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: function-jar
+          path: ./artifact
+
+      - name: Install Azure CLI
+        uses: azure/setup-azure-cli@v3
+
+      - name: Deploy using publish profile
+        env:
+          AZURE_WEBAPP_PUBLISH_PROFILE: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
+        run: |
+          echo "$AZURE_WEBAPP_PUBLISH_PROFILE" > publishProfile.xml
+          az functionapp deployment source config-zip --src `
+            bash -c 'ls artifact | sed -n "1p"'` \
+            --name ${{ secrets.AZURE_FUNCTIONAPP_NAME }} \
+            --resource-group ${{ secrets.AZURE_FUNCTIONAPP_RESOURCE_GROUP }} || (
+            echo "Attempting deploy using publish-profile with msdeploy..." && \
+            az webapp deployment source config-zip --src `ls artifact | sed -n "1p"` --name ${{ secrets.AZURE_FUNCTIONAPP_NAME }} --resource-group ${{ secrets.AZURE_FUNCTIONAPP_RESOURCE_GROUP }}
+          )
+
+      - name: Confirm deployment
+        run: echo "Deployment attempted for ${{ secrets.AZURE_FUNCTIONAPP_NAME }}"
+
