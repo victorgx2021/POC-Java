@@ -12,7 +12,7 @@
         <java.version>11</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <functions.maven.plugin.version>1.19.0</functions.maven.plugin.version>
-        <azure.functions.java.library.version>1.4.3</azure.functions.java.library.version>
+    <azure.functions.java.library.version>1.4.2</azure.functions.java.library.version>
     </properties>
 
     <dependencies>
