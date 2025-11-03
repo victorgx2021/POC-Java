@@ -34,6 +34,16 @@ jobs:
           mvn -B clean package --file pom.xml
           # package the azure functions structure; fail if plugin not configured
           mvn -B azure-functions:package
+          # ensure the repository host.json (updated extensionBundle) overrides any generated one
+          if [ -f src/main/resources/host.json ]; then
+            echo "Copying repo host.json to target/azure-functions/"
+            mkdir -p target/azure-functions
+            cp src/main/resources/host.json target/azure-functions/host.json || true
+          elif [ -f host.json ]; then
+            echo "Copying root host.json to target/azure-functions/"
+            mkdir -p target/azure-functions
+            cp host.json target/azure-functions/host.json || true
+          fi
           if [ ! -d target/azure-functions ]; then
             echo "ERROR: target/azure-functions not found. Ensure azure-functions-maven-plugin is configured." >&2
             ls -la target || true
