@@ -45,8 +45,8 @@
                     <region></region>
                     <runtime>
                         <os>linux</os>
+                        <language>java</language>
                         <javaVersion>11</javaVersion>
-                        <webContainer>java11</webContainer>
                     </runtime>
                 </configuration>
             </plugin>
