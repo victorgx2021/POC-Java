@@ -150,12 +150,13 @@ jobs:
             --name "$AZURE_FUNCTIONAPP_NAME" \
             --src "${{ steps.locate_zip.outputs.zip_path }}"
 
-      - name: Restart Function App
-        env:
-          AZURE_FUNCTIONAPP_NAME: ${{ secrets.AZURE_FUNCTIONAPP_NAME }}
-          AZURE_FUNCTIONAPP_RESOURCE_GROUP: ${{ secrets.AZURE_FUNCTIONAPP_RESOURCE_GROUP }}
-        run: |
-          az functionapp restart --name "$AZURE_FUNCTIONAPP_NAME" --resource-group "$AZURE_FUNCTIONAPP_RESOURCE_GROUP"
+  # - name: Restart Function App
+  #   env:
+  #     AZURE_FUNCTIONAPP_NAME: ${{ secrets.AZURE_FUNCTIONAPP_NAME }}
+  #     AZURE_FUNCTIONAPP_RESOURCE_GROUP: ${{ secrets.AZURE_FUNCTIONAPP_RESOURCE_GROUP }}
+  #   run: |
+  #     # RESTART COMMENTED: User reported automated restart caused issues. Uncomment to re-enable.
+  #     az functionapp restart --name "$AZURE_FUNCTIONAPP_NAME" --resource-group "$AZURE_FUNCTIONAPP_RESOURCE_GROUP"
 
       - name: Smoke test (curl)
         env:
