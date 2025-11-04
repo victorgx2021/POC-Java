@@ -127,10 +127,22 @@ jobs:
             exit 1
           fi
           
+          # CRÍTICO: Mover el JAR a lib/ (estructura esperada por Azure Functions Java)
+          mkdir -p "$TEMP_DIR/lib"
+          JAR_FILE=$(find "$TEMP_DIR" -maxdepth 1 -type f -name "*.jar" | head -1)
+          if [ -n "$JAR_FILE" ]; then
+            echo "Moviendo JAR a lib/: $(basename "$JAR_FILE")"
+            mv "$JAR_FILE" "$TEMP_DIR/lib/"
+          else
+            echo "WARNING: No se encontró JAR en la raíz"
+          fi
+          
           echo "==== host.json ===="
           cat "$TEMP_DIR/host.json"
           echo "==== HelloFunction/function.json ===="
           cat "$TEMP_DIR/HelloFunction/function.json"
+          echo "==== Estructura final ===="
+          ls -laR "$TEMP_DIR" | head -100
           
           # Crear zip limpio desde el contenido extraído
           DEPLOY_ZIP="$GITHUB_WORKSPACE/deploy.zip"
@@ -138,6 +150,7 @@ jobs:
           
           echo "Zip de deploy creado: $DEPLOY_ZIP"
           ls -lh "$DEPLOY_ZIP"
+          echo "==== Contenido del zip final ===="
           unzip -l "$DEPLOY_ZIP" | head -50
           
           echo "zip_path=$DEPLOY_ZIP" >> $GITHUB_OUTPUT
