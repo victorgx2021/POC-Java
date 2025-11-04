@@ -75,6 +75,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     environment: production
+    env:
+      HAS_AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
     steps:
       - name: Download artifact
         uses: actions/download-artifact@v4
@@ -86,13 +88,13 @@ jobs:
         uses: azure/setup-azure-cli@v3
 
       - name: Azure login (Service Principal JSON)
-        if: ${{ secrets.AZURE_CREDENTIALS != '' }}
+        if: ${{ env.HAS_AZURE_CREDENTIALS != '' }}
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Azure login (OIDC Federated)
-        if: ${{ secrets.AZURE_CREDENTIALS == '' }}
+        if: ${{ env.HAS_AZURE_CREDENTIALS == '' }}
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
