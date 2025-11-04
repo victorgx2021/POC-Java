@@ -98,39 +98,49 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Locate packaged zip
+      - name: Prepare deployment zip
         id: locate_zip
         run: |
           set -e
-          ls -la ./artifact || true
+          
+          # Encontrar el artifact descargado
           ZIP_PATH=$(find ./artifact -maxdepth 2 -type f -name "function-deploy.zip" -print -quit)
           if [ -z "$ZIP_PATH" ]; then
-            echo "ERROR: function-deploy.zip no encontrado dentro del artifact descargado" >&2
+            echo "ERROR: function-deploy.zip no encontrado" >&2
             exit 1
           fi
-          echo "Zip encontrado: $ZIP_PATH"
+          echo "Artifact original: $ZIP_PATH"
           
-          # Copiar a la raíz del runner con ruta absoluta para evitar problemas de zipdeploy
-          DEPLOY_ZIP="$GITHUB_WORKSPACE/function-deploy.zip"
-          cp "$ZIP_PATH" "$DEPLOY_ZIP"
-          echo "Zip copiado a: $DEPLOY_ZIP"
-          echo "zip_path=$DEPLOY_ZIP" >> $GITHUB_OUTPUT
+          # Extraer en un directorio temporal
+          TEMP_DIR=$(mktemp -d)
+          unzip -q "$ZIP_PATH" -d "$TEMP_DIR"
+          echo "Contenido extraído en: $TEMP_DIR"
+          ls -laR "$TEMP_DIR" | head -100
           
-          echo "==== listando zip (primeras 200 lineas) ===="
-          unzip -l "$DEPLOY_ZIP" | sed -n '1,200p'
+          # Verificar estructura esperada (host.json y HelloFunction/ en la raíz)
+          if [ ! -f "$TEMP_DIR/host.json" ]; then
+            echo "ERROR: host.json no encontrado en la raíz del zip" >&2
+            exit 1
+          fi
+          if [ ! -d "$TEMP_DIR/HelloFunction" ] || [ ! -f "$TEMP_DIR/HelloFunction/function.json" ]; then
+            echo "ERROR: HelloFunction/function.json no encontrado" >&2
+            exit 1
+          fi
+          
           echo "==== host.json ===="
-          unzip -p "$DEPLOY_ZIP" host.json | sed -n '1,200p' || true
+          cat "$TEMP_DIR/host.json"
           echo "==== HelloFunction/function.json ===="
-          unzip -p "$DEPLOY_ZIP" HelloFunction/function.json | sed -n '1,200p' || true
-          # fail if required files missing
-          if ! unzip -l "$DEPLOY_ZIP" | grep -q 'host.json'; then
-            echo "ERROR: host.json no encontrado en el zip" >&2
-            exit 1
-          fi
-          if ! unzip -l "$DEPLOY_ZIP" | grep -q 'HelloFunction/function.json'; then
-            echo "ERROR: HelloFunction/function.json no encontrado en el zip" >&2
-            exit 1
-          fi
+          cat "$TEMP_DIR/HelloFunction/function.json"
+          
+          # Crear zip limpio desde el contenido extraído
+          DEPLOY_ZIP="$GITHUB_WORKSPACE/deploy.zip"
+          (cd "$TEMP_DIR" && zip -r "$DEPLOY_ZIP" .)
+          
+          echo "Zip de deploy creado: $DEPLOY_ZIP"
+          ls -lh "$DEPLOY_ZIP"
+          unzip -l "$DEPLOY_ZIP" | head -50
+          
+          echo "zip_path=$DEPLOY_ZIP" >> $GITHUB_OUTPUT
 
 
       - name: Ensure Function App settings (mínimos)
@@ -151,17 +161,47 @@ jobs:
           AZURE_FUNCTIONAPP_RESOURCE_GROUP: ${{ secrets.AZURE_FUNCTIONAPP_RESOURCE_GROUP }}
         run: |
           set -e
-          echo "Contenido del folder actual del runner:"
-          ls
-          echo "Ruta del zip a desplegar:"
-          echo "${{ steps.locate_zip.outputs.zip_path }}"
+          ZIP_TO_DEPLOY="${{ steps.locate_zip.outputs.zip_path }}"
+          echo "Ruta del zip a desplegar: $ZIP_TO_DEPLOY"
+          
+          if [ ! -f "$ZIP_TO_DEPLOY" ]; then
+            echo "ERROR: Zip no encontrado en $ZIP_TO_DEPLOY" >&2
+            exit 1
+          fi
+          
+          echo "Tamaño del zip: $(ls -lh "$ZIP_TO_DEPLOY" | awk '{print $5}')"
           echo "Contenido del zip:"
-          unzip -l "${{ steps.locate_zip.outputs.zip_path }}"
+          unzip -l "$ZIP_TO_DEPLOY" | head -50
+          
           az functionapp deployment source config-zip \
             --resource-group "$AZURE_FUNCTIONAPP_RESOURCE_GROUP" \
             --name "$AZURE_FUNCTIONAPP_NAME" \
-            --src function-deploy.zip
-            #--src "${{ steps.locate_zip.outputs.zip_path }}"
+            --src "$ZIP_TO_DEPLOY" \
+            --timeout 300
+
+      - name: Verificar deployment (Kudu)
+        env:
+          AZURE_FUNCTIONAPP_NAME: ${{ secrets.AZURE_FUNCTIONAPP_NAME }}
+          AZURE_FUNCTIONAPP_RESOURCE_GROUP: ${{ secrets.AZURE_FUNCTIONAPP_RESOURCE_GROUP }}
+        run: |
+          set -e
+          echo "Obteniendo credenciales de publicación..."
+          CREDS=$(az functionapp deployment list-publishing-profiles \
+            --name "$AZURE_FUNCTIONAPP_NAME" \
+            --resource-group "$AZURE_FUNCTIONAPP_RESOURCE_GROUP" \
+            --query "[?publishMethod=='ZipDeploy']|[0]" -o json)
+          
+          USER=$(echo "$CREDS" | jq -r '.userName')
+          PASS=$(echo "$CREDS" | jq -r '.userPWD')
+          
+          echo "==== Deployment Log (Kudu) ===="
+          curl -s -u "$USER:$PASS" \
+            "https://$AZURE_FUNCTIONAPP_NAME.scm.azurewebsites.net/api/deployments/latest/log" | jq . || true
+          
+          echo "==== Contenido wwwroot ===="
+          curl -s -u "$USER:$PASS" \
+            "https://$AZURE_FUNCTIONAPP_NAME.scm.azurewebsites.net/api/vfs/site/wwwroot/" | jq '.[].name' || true
+
 
   # - name: Restart Function App
   #   env:
