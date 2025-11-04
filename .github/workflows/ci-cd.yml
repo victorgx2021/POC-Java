@@ -158,20 +158,45 @@ jobs:
   #     # RESTART COMMENTED: User reported automated restart caused issues. Uncomment to re-enable.
   #     az functionapp restart --name "$AZURE_FUNCTIONAPP_NAME" --resource-group "$AZURE_FUNCTIONAPP_RESOURCE_GROUP"
 
-      - name: Smoke test (curl)
+      - name: Smoke test (curl con reintentos)
         env:
           AZURE_FUNCTIONAPP_NAME: ${{ secrets.AZURE_FUNCTIONAPP_NAME }}
           AZURE_FUNCTIONAPP_RESOURCE_GROUP: ${{ secrets.AZURE_FUNCTIONAPP_RESOURCE_GROUP }}
         run: |
           set -e
           HOST=$(az functionapp show -n "$AZURE_FUNCTIONAPP_NAME" -g "$AZURE_FUNCTIONAPP_RESOURCE_GROUP" --query defaultHostName -o tsv)
-          echo "Calling https://$HOST/api/HelloFunction?name=CI"
-          HTTP=$(curl -s -o /dev/null -w "%{http_code}" "https://$HOST/api/HelloFunction?name=CI")
-          echo "Status: $HTTP"
-          if [ "$HTTP" != "200" ]; then
-            echo "Smoke test failed with status $HTTP" >&2
-            exit 1
-          fi
+          URL="https://$HOST/api/HelloFunction?name=CI"
+          
+          echo "Esperando 15 segundos para que el host se inicie tras el zipdeploy..."
+          sleep 15
+          
+          echo "Probando endpoint: $URL"
+          MAX_RETRIES=5
+          RETRY_DELAY=5
+          
+          for i in $(seq 1 $MAX_RETRIES); do
+            echo "Intento $i/$MAX_RETRIES..."
+            HTTP=$(curl -s -o /tmp/response.txt -w "%{http_code}" "$URL")
+            BODY=$(cat /tmp/response.txt 2>/dev/null || echo "")
+            
+            echo "  Status: $HTTP"
+            if [ -n "$BODY" ]; then
+              echo "  Body: $BODY"
+            fi
+            
+            if [ "$HTTP" = "200" ]; then
+              echo "✓ Smoke test exitoso!"
+              exit 0
+            fi
+            
+            if [ $i -lt $MAX_RETRIES ]; then
+              echo "  Reintentando en ${RETRY_DELAY}s..."
+              sleep $RETRY_DELAY
+            fi
+          done
+          
+          echo "✗ Smoke test falló después de $MAX_RETRIES intentos (último status: $HTTP)" >&2
+          exit 1
 
       - name: Confirm deployment
         run: echo "Deployment attempted for ${{ secrets.AZURE_FUNCTIONAPP_NAME }}"
