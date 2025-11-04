@@ -155,7 +155,7 @@ jobs:
             --resource-group "$AZURE_FUNCTIONAPP_RESOURCE_GROUP" \
             --settings FUNCTIONS_WORKER_RUNTIME=java FUNCTIONS_EXTENSION_VERSION=~4 WEBSITE_RUN_FROM_PACKAGE=0
 
-      - name: Deploy zip (config-zip)
+      - name: Deploy zip via Kudu API (más confiable)
         env:
           AZURE_FUNCTIONAPP_NAME: ${{ secrets.AZURE_FUNCTIONAPP_NAME }}
           AZURE_FUNCTIONAPP_RESOURCE_GROUP: ${{ secrets.AZURE_FUNCTIONAPP_RESOURCE_GROUP }}
@@ -170,37 +170,64 @@ jobs:
           fi
           
           echo "Tamaño del zip: $(ls -lh "$ZIP_TO_DEPLOY" | awk '{print $5}')"
-          echo "Contenido del zip:"
-          unzip -l "$ZIP_TO_DEPLOY" | head -50
           
-          az functionapp deployment source config-zip \
-            --resource-group "$AZURE_FUNCTIONAPP_RESOURCE_GROUP" \
+          # Obtener credenciales de Kudu desde los app settings
+          echo "Obteniendo credenciales de publish..."
+          CREDS_JSON=$(az webapp deployment list-publishing-credentials \
             --name "$AZURE_FUNCTIONAPP_NAME" \
-            --src "$ZIP_TO_DEPLOY" \
-            --timeout 300
+            --resource-group "$AZURE_FUNCTIONAPP_RESOURCE_GROUP" -o json)
+          
+          PUBLISH_USER=$(echo "$CREDS_JSON" | jq -r '.publishingUserName')
+          PUBLISH_PASS=$(echo "$CREDS_JSON" | jq -r '.publishingPassword')
+          
+          echo "Usuario Kudu: $PUBLISH_USER"
+          
+          # Deploy usando Kudu zipdeploy API (más confiable que az CLI)
+          echo "Desplegando vía Kudu API..."
+          HTTP_STATUS=$(curl -X POST \
+            -u "$PUBLISH_USER:$PUBLISH_PASS" \
+            --data-binary @"$ZIP_TO_DEPLOY" \
+            -H "Content-Type: application/zip" \
+            -w "%{http_code}" \
+            -o /tmp/deploy_response.json \
+            "https://$AZURE_FUNCTIONAPP_NAME.scm.azurewebsites.net/api/zipdeploy?isAsync=false")
+          
+          echo "Status HTTP del deploy: $HTTP_STATUS"
+          echo "Respuesta del servidor:"
+          cat /tmp/deploy_response.json || true
+          
+          if [ "$HTTP_STATUS" != "200" ] && [ "$HTTP_STATUS" != "202" ]; then
+            echo "ERROR: Deploy falló con status $HTTP_STATUS" >&2
+            exit 1
+          fi
+          
+          echo "✓ Deploy completado exitosamente"
 
-      - name: Verificar deployment (Kudu)
-        env:
-          AZURE_FUNCTIONAPP_NAME: ${{ secrets.AZURE_FUNCTIONAPP_NAME }}
-          AZURE_FUNCTIONAPP_RESOURCE_GROUP: ${{ secrets.AZURE_FUNCTIONAPP_RESOURCE_GROUP }}
-        run: |
-          set -e
-          echo "Obteniendo credenciales de publicación..."
-          CREDS=$(az functionapp deployment list-publishing-profiles \
-            --name "$AZURE_FUNCTIONAPP_NAME" \
-            --resource-group "$AZURE_FUNCTIONAPP_RESOURCE_GROUP" \
-            --query "[?publishMethod=='ZipDeploy']|[0]" -o json)
-          
-          USER=$(echo "$CREDS" | jq -r '.userName')
-          PASS=$(echo "$CREDS" | jq -r '.userPWD')
-          
-          echo "==== Deployment Log (Kudu) ===="
-          curl -s -u "$USER:$PASS" \
-            "https://$AZURE_FUNCTIONAPP_NAME.scm.azurewebsites.net/api/deployments/latest/log" | jq . || true
-          
-          echo "==== Contenido wwwroot ===="
-          curl -s -u "$USER:$PASS" \
-            "https://$AZURE_FUNCTIONAPP_NAME.scm.azurewebsites.net/api/vfs/site/wwwroot/" | jq '.[].name' || true
+  # COMENTADO: Requiere permisos adicionales del Service Principal (serverfarms/read)
+  # Descomentar si amplías los permisos del SP o usas otro método de autenticación
+  #
+  #   - name: Verificar deployment (Kudu)
+  #     env:
+  #       AZURE_FUNCTIONAPP_NAME: ${{ secrets.AZURE_FUNCTIONAPP_NAME }}
+  #       AZURE_FUNCTIONAPP_RESOURCE_GROUP: ${{ secrets.AZURE_FUNCTIONAPP_RESOURCE_GROUP }}
+  #     run: |
+  #       set -e
+  #       echo "Obteniendo credenciales de publicación..."
+  #       CREDS=$(az functionapp deployment list-publishing-profiles \
+  #         --name "$AZURE_FUNCTIONAPP_NAME" \
+  #         --resource-group "$AZURE_FUNCTIONAPP_RESOURCE_GROUP" \
+  #         --query "[?publishMethod=='ZipDeploy']|[0]" -o json)
+  #       
+  #       USER=$(echo "$CREDS" | jq -r '.userName')
+  #       PASS=$(echo "$CREDS" | jq -r '.userPWD')
+  #       
+  #       echo "==== Deployment Log (Kudu) ===="
+  #       curl -s -u "$USER:$PASS" \
+  #         "https://$AZURE_FUNCTIONAPP_NAME.scm.azurewebsites.net/api/deployments/latest/log" | jq . || true
+  #       
+  #       echo "==== Contenido wwwroot ===="
+  #       curl -s -u "$USER:$PASS" \
+  #         "https://$AZURE_FUNCTIONAPP_NAME.scm.azurewebsites.net/api/vfs/site/wwwroot/" | jq '.[].name' || true
 
 
   # - name: Restart Function App
@@ -220,12 +247,12 @@ jobs:
           HOST=$(az functionapp show -n "$AZURE_FUNCTIONAPP_NAME" -g "$AZURE_FUNCTIONAPP_RESOURCE_GROUP" --query defaultHostName -o tsv)
           URL="https://$HOST/api/HelloFunction?name=CI"
           
-          echo "Esperando 15 segundos para que el host se inicie tras el zipdeploy..."
-          sleep 15
+          echo "Esperando 30 segundos para que el host inicie tras el deploy..."
+          sleep 30
           
           echo "Probando endpoint: $URL"
-          MAX_RETRIES=5
-          RETRY_DELAY=5
+          MAX_RETRIES=8
+          RETRY_DELAY=10
           
           for i in $(seq 1 $MAX_RETRIES); do
             echo "Intento $i/$MAX_RETRIES..."
