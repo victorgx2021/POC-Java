@@ -171,16 +171,23 @@ jobs:
           
           echo "Tamaño del zip: $(ls -lh "$ZIP_TO_DEPLOY" | awk '{print $5}')"
           
-          # Obtener credenciales de Kudu desde los app settings
-          echo "Obteniendo credenciales de publish..."
-          CREDS_JSON=$(az webapp deployment list-publishing-credentials \
+          # Obtener publish profile con las credenciales correctas de Kudu
+          echo "Obteniendo publish profile..."
+          az webapp deployment list-publishing-profiles \
             --name "$AZURE_FUNCTIONAPP_NAME" \
-            --resource-group "$AZURE_FUNCTIONAPP_RESOURCE_GROUP" -o json)
+            --resource-group "$AZURE_FUNCTIONAPP_RESOURCE_GROUP" \
+            --xml > /tmp/publishprofile.xml
           
-          PUBLISH_USER=$(echo "$CREDS_JSON" | jq -r '.publishingUserName')
-          PUBLISH_PASS=$(echo "$CREDS_JSON" | jq -r '.publishingPassword')
+          # Extraer usuario y contraseña del perfil ZipDeploy
+          PUBLISH_USER=$(grep 'publishMethod="ZipDeploy"' /tmp/publishprofile.xml | sed -n 's/.*userName="\([^"]*\)".*/\1/p' | head -1)
+          PUBLISH_PASS=$(grep 'publishMethod="ZipDeploy"' /tmp/publishprofile.xml | sed -n 's/.*userPWD="\([^"]*\)".*/\1/p' | head -1)
           
-          echo "Usuario Kudu: $PUBLISH_USER"
+          if [ -z "$PUBLISH_USER" ] || [ -z "$PUBLISH_PASS" ]; then
+            echo "ERROR: No se pudieron extraer las credenciales del publish profile" >&2
+            exit 1
+          fi
+          
+          echo "Usuario Kudu: ${PUBLISH_USER:0:10}..."
           
           # Deploy usando Kudu zipdeploy API (más confiable que az CLI)
           echo "Desplegando vía Kudu API..."
