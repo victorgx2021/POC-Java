@@ -111,9 +111,10 @@ jobs:
           echo "Zip encontrado: $ZIP_PATH"
           echo "zip_path=$ZIP_PATH" >> $GITHUB_OUTPUT
           echo "===="
-          unzip -l function-deploy.zip
+          unzip -l ./artifact/function-deploy.zip
           echo "===="
-          
+          unzip -p ./artifact/function-deploy.zip function.json | less
+
 
       - name: Ensure Function App settings (mínimos)
         env:
