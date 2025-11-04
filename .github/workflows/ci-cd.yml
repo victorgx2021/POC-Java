@@ -160,7 +160,8 @@ jobs:
           az functionapp deployment source config-zip \
             --resource-group "$AZURE_FUNCTIONAPP_RESOURCE_GROUP" \
             --name "$AZURE_FUNCTIONAPP_NAME" \
-            --src "${{ steps.locate_zip.outputs.zip_path }}"
+            --src function-deploy.zip
+            #--src "${{ steps.locate_zip.outputs.zip_path }}"
 
   # - name: Restart Function App
   #   env:
