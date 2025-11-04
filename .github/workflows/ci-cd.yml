@@ -113,7 +113,9 @@ jobs:
           echo "===="
           unzip -l ./artifact/function-deploy.zip
           echo "===="
-          unzip -p ./artifact/function-deploy.zip function.json | less
+          unzip -p ./artifact/function-deploy.zip HelloFunction/function.json | less
+          echo "===="
+          unzip -p ./artifact/function-deploy.zip HelloFunction/host.json | less
 
 
       - name: Ensure Function App settings (mínimos)
