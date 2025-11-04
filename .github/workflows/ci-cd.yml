@@ -153,8 +153,10 @@ jobs:
           set -e
           echo "Contenido del folder actual del runner:"
           ls
+          echo "Ruta del zip a desplegar:"
+          echo "${{ steps.locate_zip.outputs.zip_path }}"
           echo "Contenido del zip:"
-          unzip -l "$DEPLOY_ZIP"
+          unzip -l "${{ steps.locate_zip.outputs.zip_path }}"
           az functionapp deployment source config-zip \
             --resource-group "$AZURE_FUNCTIONAPP_RESOURCE_GROUP" \
             --name "$AZURE_FUNCTIONAPP_NAME" \
