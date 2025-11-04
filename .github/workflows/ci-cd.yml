@@ -98,7 +98,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Prepare deployment zip
+      - name: Use artifact zip directly
         id: locate_zip
         run: |
           set -e
@@ -109,49 +109,33 @@ jobs:
             echo "ERROR: function-deploy.zip no encontrado" >&2
             exit 1
           fi
-          echo "Artifact original: $ZIP_PATH"
+          echo "Artifact encontrado: $ZIP_PATH"
           
-          # Extraer en un directorio temporal
-          TEMP_DIR=$(mktemp -d)
-          unzip -q "$ZIP_PATH" -d "$TEMP_DIR"
-          echo "Contenido extraído en: $TEMP_DIR"
-          ls -laR "$TEMP_DIR" | head -100
+          # Copiar a la raíz del workspace SIN modificar
+          DEPLOY_ZIP="$GITHUB_WORKSPACE/function-deploy.zip"
+          cp "$ZIP_PATH" "$DEPLOY_ZIP"
           
-          # Verificar estructura esperada (host.json y HelloFunction/ en la raíz)
-          if [ ! -f "$TEMP_DIR/host.json" ]; then
-            echo "ERROR: host.json no encontrado en la raíz del zip" >&2
-            exit 1
-          fi
-          if [ ! -d "$TEMP_DIR/HelloFunction" ] || [ ! -f "$TEMP_DIR/HelloFunction/function.json" ]; then
-            echo "ERROR: HelloFunction/function.json no encontrado" >&2
-            exit 1
-          fi
+          echo "Zip copiado a: $DEPLOY_ZIP"
+          ls -lh "$DEPLOY_ZIP"
           
-          # CRÍTICO: Mover el JAR a lib/ (estructura esperada por Azure Functions Java)
-          mkdir -p "$TEMP_DIR/lib"
-          JAR_FILE=$(find "$TEMP_DIR" -maxdepth 1 -type f -name "*.jar" | head -1)
-          if [ -n "$JAR_FILE" ]; then
-            echo "Moviendo JAR a lib/: $(basename "$JAR_FILE")"
-            mv "$JAR_FILE" "$TEMP_DIR/lib/"
-          else
-            echo "WARNING: No se encontró JAR en la raíz"
-          fi
+          echo "==== Contenido del zip (exactamente como lo genera Maven) ===="
+          unzip -l "$DEPLOY_ZIP"
           
           echo "==== host.json ===="
-          cat "$TEMP_DIR/host.json"
+          unzip -p "$DEPLOY_ZIP" host.json || true
+          
           echo "==== HelloFunction/function.json ===="
-          cat "$TEMP_DIR/HelloFunction/function.json"
-          echo "==== Estructura final ===="
-          ls -laR "$TEMP_DIR" | head -100
+          unzip -p "$DEPLOY_ZIP" HelloFunction/function.json || true
           
-          # Crear zip limpio desde el contenido extraído
-          DEPLOY_ZIP="$GITHUB_WORKSPACE/deploy.zip"
-          (cd "$TEMP_DIR" && zip -r "$DEPLOY_ZIP" .)
-          
-          echo "Zip de deploy creado: $DEPLOY_ZIP"
-          ls -lh "$DEPLOY_ZIP"
-          echo "==== Contenido del zip final ===="
-          unzip -l "$DEPLOY_ZIP" | head -50
+          # Validar que el zip tiene lo mínimo necesario
+          if ! unzip -l "$DEPLOY_ZIP" | grep -q 'host.json'; then
+            echo "ERROR: host.json no encontrado en el zip" >&2
+            exit 1
+          fi
+          if ! unzip -l "$DEPLOY_ZIP" | grep -q 'HelloFunction/function.json'; then
+            echo "ERROR: HelloFunction/function.json no encontrado en el zip" >&2
+            exit 1
+          fi
           
           echo "zip_path=$DEPLOY_ZIP" >> $GITHUB_OUTPUT
 
