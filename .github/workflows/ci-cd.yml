@@ -110,12 +110,21 @@ jobs:
           fi
           echo "Zip encontrado: $ZIP_PATH"
           echo "zip_path=$ZIP_PATH" >> $GITHUB_OUTPUT
-          echo "===="
-          unzip -l ./artifact/function-deploy.zip
-          echo "===="
-          unzip -p ./artifact/function-deploy.zip HelloFunction/function.json | less
-          echo "===="
-          unzip -p ./artifact/function-deploy.zip HelloFunction/host.json | less
+          echo "==== listando zip (primeras 200 lineas) ===="
+          unzip -l "$ZIP_PATH" | sed -n '1,200p'
+          echo "==== host.json ===="
+          unzip -p "$ZIP_PATH" host.json | sed -n '1,200p' || true
+          echo "==== HelloFunction/function.json ===="
+          unzip -p "$ZIP_PATH" HelloFunction/function.json | sed -n '1,200p' || true
+          # fail if required files missing
+          if ! unzip -l "$ZIP_PATH" | grep -q 'host.json'; then
+            echo "ERROR: host.json no encontrado en el zip" >&2
+            exit 1
+          fi
+          if ! unzip -l "$ZIP_PATH" | grep -q 'HelloFunction/function.json'; then
+            echo "ERROR: HelloFunction/function.json no encontrado en el zip" >&2
+            exit 1
+          fi
 
 
       - name: Ensure Function App settings (mínimos)
@@ -147,6 +156,21 @@ jobs:
           AZURE_FUNCTIONAPP_RESOURCE_GROUP: ${{ secrets.AZURE_FUNCTIONAPP_RESOURCE_GROUP }}
         run: |
           az functionapp restart --name "$AZURE_FUNCTIONAPP_NAME" --resource-group "$AZURE_FUNCTIONAPP_RESOURCE_GROUP"
+
+      - name: Smoke test (curl)
+        env:
+          AZURE_FUNCTIONAPP_NAME: ${{ secrets.AZURE_FUNCTIONAPP_NAME }}
+          AZURE_FUNCTIONAPP_RESOURCE_GROUP: ${{ secrets.AZURE_FUNCTIONAPP_RESOURCE_GROUP }}
+        run: |
+          set -e
+          HOST=$(az functionapp show -n "$AZURE_FUNCTIONAPP_NAME" -g "$AZURE_FUNCTIONAPP_RESOURCE_GROUP" --query defaultHostName -o tsv)
+          echo "Calling https://$HOST/api/HelloFunction?name=CI"
+          HTTP=$(curl -s -o /dev/null -w "%{http_code}" "https://$HOST/api/HelloFunction?name=CI")
+          echo "Status: $HTTP"
+          if [ "$HTTP" != "200" ]; then
+            echo "Smoke test failed with status $HTTP" >&2
+            exit 1
+          fi
 
       - name: Confirm deployment
         run: echo "Deployment attempted for ${{ secrets.AZURE_FUNCTIONAPP_NAME }}"

@@ -12,7 +12,7 @@ public class HelloFunction {
             final ExecutionContext context) {
         context.getLogger().info("Java HTTP trigger processed a request.");
         String name = request.getQueryParameters().getOrDefault("name", "World");
-        String response = String.format("Hello, %s! 02", name);
+        String response = String.format("Hello, %s! 03", name);
         return request.createResponseBuilder(HttpStatus.OK).body(response).build();
     }
 }
