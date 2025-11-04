@@ -109,19 +109,25 @@ jobs:
             exit 1
           fi
           echo "Zip encontrado: $ZIP_PATH"
-          echo "zip_path=$ZIP_PATH" >> $GITHUB_OUTPUT
+          
+          # Copiar a la raíz del runner con ruta absoluta para evitar problemas de zipdeploy
+          DEPLOY_ZIP="$GITHUB_WORKSPACE/function-deploy.zip"
+          cp "$ZIP_PATH" "$DEPLOY_ZIP"
+          echo "Zip copiado a: $DEPLOY_ZIP"
+          echo "zip_path=$DEPLOY_ZIP" >> $GITHUB_OUTPUT
+          
           echo "==== listando zip (primeras 200 lineas) ===="
-          unzip -l "$ZIP_PATH" | sed -n '1,200p'
+          unzip -l "$DEPLOY_ZIP" | sed -n '1,200p'
           echo "==== host.json ===="
-          unzip -p "$ZIP_PATH" host.json | sed -n '1,200p' || true
+          unzip -p "$DEPLOY_ZIP" host.json | sed -n '1,200p' || true
           echo "==== HelloFunction/function.json ===="
-          unzip -p "$ZIP_PATH" HelloFunction/function.json | sed -n '1,200p' || true
+          unzip -p "$DEPLOY_ZIP" HelloFunction/function.json | sed -n '1,200p' || true
           # fail if required files missing
-          if ! unzip -l "$ZIP_PATH" | grep -q 'host.json'; then
+          if ! unzip -l "$DEPLOY_ZIP" | grep -q 'host.json'; then
             echo "ERROR: host.json no encontrado en el zip" >&2
             exit 1
           fi
-          if ! unzip -l "$ZIP_PATH" | grep -q 'HelloFunction/function.json'; then
+          if ! unzip -l "$DEPLOY_ZIP" | grep -q 'HelloFunction/function.json'; then
             echo "ERROR: HelloFunction/function.json no encontrado en el zip" >&2
             exit 1
           fi
